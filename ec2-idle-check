@@ -1,0 +1,76 @@
+#!/usr/bin/env ruby
+
+#
+# ec2-idle-check
+# Copyright (c) 2012 Aaron Namba <aaron@biggerbird.com>
+#
+# dependencies: curl binary
+#
+# Run this at startup (from /etc/rc.local or similar). Daemonizes and stops instance
+# when no one is logged in for <idle timeout> minutes.
+#
+# Distributed under MIT license.
+#
+
+# tunable parameters
+ENV['EC2_CERT'] = "/root/.ec2/cert-DPHRABJ3AR44PROWWGTC3ULUQIALCXR2.pem"
+ENV['EC2_PRIVATE_KEY']= "/root/.ec2/pk-DPHRABJ3AR44PROWWGTC3ULUQIALCXR2.pem"
+@@logfile = "/var/log/ec2-idle-check.log"
+@@pidfile = "/var/run/ec2-idle-check.pid"
+@@timeout = 2 # minutes
+@@check_interval = 30 # seconds
+
+# do a few checks, then start daemon and detach
+File.open(@@pidfile, 'a') { } # noop
+File.open(@@logfile, 'a') { } # noop
+
+region = `curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone`.strip.gsub(/(\d).*?$/, '\1')
+ENV['EC2_REGION'] = region
+ENV['EC2_URL'] = "https://ec2.#{region}.amazonaws.com"
+
+instance_id = `curl -s http://169.254.169.254/latest/meta-data/instance-id`.strip
+puts "Detected region = #{region}, instance id = #{instance_id}. Checking AWS credentials..."
+
+output = `ec2-describe-instances #{instance_id}`
+unless output =~ /r-[0-9a-f]{8}/
+  puts "Couldn't authenticate with EC2, double-check your EC2_CERT and EC2_PRIVATE_KEY paths."
+  exit 1
+end
+
+if pid = fork
+  File.open(@@pidfile, 'w') { |f| f.print pid.to_s }
+  puts "Daemon started with pid #{pid}"
+  Process.detach(pid)
+  exit 0
+end
+
+
+# open the log
+logger = File.open(@@logfile, 'a')
+logger.sync = true
+
+# init idle start variable
+idle_since = nil
+
+# start our infinite loop
+while true
+  # check to see who's here
+  users = `users`.strip.split(/\s/)
+  
+  if users.empty?
+    idle_since ||= Time.now.utc
+    idle_time = Time.now.utc - idle_since
+    logger.puts "Server idle since #{idle_since} (#{idle_time} seconds)"
+    if idle_time > @@timeout * 60
+      logger.puts "Idle timeout exceeded, sending STOP command now."
+      logger.puts "Executing: ec2-stop-instances #{instance_id}"
+      logger.puts `ec2-stop-instances #{instance_id}`
+    end
+  else
+    logger.puts "Users online: #{users.inspect}"
+    since = nil
+  end
+  
+  sleep @@check_interval
+end
+logger.close
