@@ -13,12 +13,12 @@
 #
 
 # tunable parameters
-ENV['EC2_CERT'] = "/root/.ec2/cert-DPHRABJ3AR44PROWWGTC3ULUQIALCXR2.pem"
-ENV['EC2_PRIVATE_KEY']= "/root/.ec2/pk-DPHRABJ3AR44PROWWGTC3ULUQIALCXR2.pem"
+ENV['EC2_CERT'] = "/root/.ec2/cert-X.pem"
+ENV['EC2_PRIVATE_KEY']= "/root/.ec2/pk-X.pem"
 @@logfile = "/var/log/ec2-idle-check.log"
 @@pidfile = "/var/run/ec2-idle-check.pid"
-@@timeout = 2 # minutes
-@@check_interval = 30 # seconds
+@@timeout = 15 # minutes
+@@check_interval = 60 # seconds
 
 # do a few checks, then start daemon and detach
 File.open(@@pidfile, 'a') { } # noop

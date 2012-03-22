@@ -1,0 +1,16 @@
+ec2-idle-check
+Last modified 2012-03-22
+Copyright (c) 2012 Aaron Namba <aaron@biggerbird.com>
+
+Distributed under MIT license.
+
+Dependencies: curl binary
+
+Run this at startup (from /etc/rc.local or similar). Daemonizes and stops instance when no one is logged in for <idle timeout> minutes. To run API tools in rc.local, you'll need the following:
+. /etc/profile.d/aws-apitools-common.sh
+
+Of course, you should only use this with EBS-backed instances, which can be stopped and started without losing data, barring hardware or EC2 issues. (And to guard against those very issues, if you care about your instance data, you should issue a ec2-modify-instance-attribute --block-device-mapping /dev/sda1=:false <instanceid> to make sure your EBS volume is not auto-deleted if your instance happens to terminate prematurely.)
+
+This also works well if you have Route 53 or some other dynamic DNS service set to update your instance's DNS entry on boot. If you are using Route 53, install the route53 gem and run something like this at startup:
+export HOME=/root
+route53 --zone mydomain.com. -g --name myname.mydomain.com. --type CNAME --ttl 60 --value `curl -s http://169.254.169.254/latest/meta-data/public-hostname` >> /var/log/route53_log 2>&1
