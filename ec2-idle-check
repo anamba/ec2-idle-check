@@ -2,29 +2,33 @@
 
 #
 # ec2-idle-check
-# Copyright (c) 2012 Aaron Namba <aaron@biggerbird.com>
+# Copyright (c) 2012-2019 Aaron Namba <aaron@biggerbird.com>
+# Distributed under MIT license.
 #
-# dependencies: curl binary
+# dependencies: ruby, curl, ec2-api-tools
 #
 # Run this at startup (from /etc/rc.local or similar). Daemonizes and stops instance
 # when no one is logged in for <idle timeout> minutes.
 #
-# Distributed under MIT license.
-#
+
+unless ENV['AWS_ACCESS_KEY'] && ENV['AWS_SECRET_KEY']
+  puts "Missing required environment variables AWS_ACCESS_KEY and AWS_SECRET_KEY"
+  exit 1
+end
 
 # tunable parameters
-ENV['EC2_CERT'] = "/root/.ec2/cert-X.pem"
-ENV['EC2_PRIVATE_KEY']= "/root/.ec2/pk-X.pem"
-@@logfile = "/var/log/ec2-idle-check.log"
-@@pidfile = "/var/run/ec2-idle-check.pid"
-@@timeout = 15 # minutes
-@@check_interval = 60 # seconds
+timeout = ARGV.shift&.to_i || 15 # minutes
+check_interval = ARGV.shift&.to_i || 60 # seconds
 
-# do a few checks, then start daemon and detach
-File.open(@@pidfile, 'a') { } # noop
-File.open(@@logfile, 'a') { } # noop
+logfile = "/var/log/ec2-idle-check.log"
+pidfile = "/var/run/ec2-idle-check.pid"
 
-region = `curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone`.strip.gsub(/(\d).*?$/, '\1')
+# check to make sure we have access to logfile and pidfile
+File.open(pidfile, 'a') { } # noop
+File.open(logfile, 'a') { } # noop
+
+az = `curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone`
+region = az.strip.gsub(/(\-\d+)\w+$/, '\1') # e.g. -2c -> -2
 ENV['EC2_REGION'] = region
 ENV['EC2_URL'] = "https://ec2.#{region}.amazonaws.com"
 
@@ -32,45 +36,53 @@ instance_id = `curl -s http://169.254.169.254/latest/meta-data/instance-id`.stri
 puts "Detected region = #{region}, instance id = #{instance_id}. Checking AWS credentials..."
 
 output = `ec2-describe-instances #{instance_id}`
-unless output =~ /r-[0-9a-f]{8}/
-  puts "Couldn't authenticate with EC2, double-check your EC2_CERT and EC2_PRIVATE_KEY paths."
+unless output =~ /r-[0-9a-f]{8,17}/
+  puts "Couldn't authenticate with EC2, double-check your AWS_ACCESS_KEY and AWS_SECRET_KEY environment variables."
   exit 1
 end
 
+# daemonize
 if pid = fork
-  File.open(@@pidfile, 'w') { |f| f.print pid.to_s }
-  puts "Daemon started with pid #{pid}"
+  File.open(pidfile, 'w') { |f| f.print pid.to_s }
+  puts "ec2-idle-check daemon started successfully with pid #{pid}."
   Process.detach(pid)
   exit 0
 end
 
-
-# open the log
-logger = File.open(@@logfile, 'a')
+# open the log file in append mode
+logger = File.open(logfile, 'a')
 logger.sync = true
 
-# init idle start variable
+# start main loop
 idle_since = nil
-
-# start our infinite loop
 while true
   # check to see who's here
-  users = `users`.strip.split(/\s/)
-  
-  if users.empty?
-    idle_since ||= Time.now.utc
-    idle_time = Time.now.utc - idle_since
-    logger.puts "Server idle since #{idle_since} (#{idle_time} seconds)"
-    if idle_time > @@timeout * 60
-      logger.puts "Idle timeout exceeded, sending STOP command now."
-      logger.puts "Executing: ec2-stop-instances #{instance_id}"
+  active_users = 0
+  `w -hs | awk '{print $4}'`.each_line do |line|
+    if line =~ /^(\d+)\.(\d+)s$/
+      active_users += 1
+    elsif line =~ /(\d+):(\d{2})$/
+      # idle_sec = $1.to_i * 60 + $2.to_i
+      # if idle_sec < 600 # 5 minutes
+      #   active_users += 1
+      # end
+    end
+  end
+
+  if active_users == 0
+    idle_since ||= Time.now
+    idle_time = Time.now.to_i - idle_since.to_i
+    logger.puts "[#{Time.now}] Server idle since #{idle_since} (#{idle_time} seconds)"
+    if idle_time > timeout * 60
+      logger.puts "[#{Time.now}] Idle timeout exceeded, sending STOP command now."
+      logger.puts "[#{Time.now}] Executing `ec2-stop-instances #{instance_id}`:"
       logger.puts `ec2-stop-instances #{instance_id}`
     end
   else
-    logger.puts "Users online: #{users.inspect}"
-    since = nil
+    logger.puts "[#{Time.now}] Server active (users: #{active_users})"
+    idle_since = nil
   end
-  
-  sleep @@check_interval
+
+  sleep check_interval
 end
 logger.close

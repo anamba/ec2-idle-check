@@ -1,0 +1,48 @@
+#!/usr/bin/env ruby
+
+#
+# ec2-update-dns
+# Copyright (c) 2019 Aaron Namba <aaron@biggerbird.com>
+# Distributed under MIT license.
+#
+# dependencies: ruby, aws-sdk-route53 gem
+#
+# usage: ec2-update-dns <hostname> <route53-hosted-zone-id>
+#
+# Run this at startup (from /etc/rc.local or similar). Daemonizes and stops instance
+# when no one is logged in for <idle timeout> minutes.
+#
+
+require 'aws-sdk-route53'
+
+record_name = ARGV.shift
+hosted_zone_id = ARGV.shift
+ttl = 60
+
+hostname = `curl -s http://169.254.169.254/latest/meta-data/public-hostname`.strip
+
+client = Aws::Route53::Client.new
+
+resp = client.change_resource_record_sets({
+  change_batch: {
+    changes: [
+      {
+        action: "UPSERT",
+        resource_record_set: {
+          name: record_name,
+          resource_records: [
+            {
+              value: hostname + '.',
+            },
+          ],
+          ttl: ttl,
+          type: "CNAME",
+        },
+      },
+    ],
+    comment: "On-demand dev server",
+  },
+  hosted_zone_id: hosted_zone_id,
+})
+
+puts "Done: #{record_name} CNAME #{hostname} #{ttl}"
