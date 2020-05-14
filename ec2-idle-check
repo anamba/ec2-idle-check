@@ -69,6 +69,13 @@ while true
     end
   end
 
+  # check for special processes that indicate user activity
+  `ps ax`.each_line do |line|
+    if line =~ /watcherService/ # vscode remote ssh
+      active_users += 1
+    end
+  end
+
   if active_users == 0
     idle_since ||= Time.now
     idle_time = Time.now.to_i - idle_since.to_i

@@ -1,6 +1,6 @@
 # ec2-idle-check - stop instance when there are no active users
 
-# Purpose
+## Purpose
 
 If you use an EBS-backed EC2 instance for development, you can reduce your EC2 costs by starting it when you need it, and stopping when you're done. But of course, we all forget that last step sometimes.
 
